@@ -15,7 +15,6 @@ contract lendProtocolDefi is Test {
     CuStableCoin cu;
     HelperConfig config;
 
-
     address public ethUsdPriceFeed;
     address public btcUsdPriceFeed;
     address public weth;
@@ -24,31 +23,37 @@ contract lendProtocolDefi is Test {
 
     function setUp() public {
         deployer = new DeployCuCoin();
-        
-        (cu, defiProtocol, config) = deployer.run();
-        
 
-        (ethUsdPriceFeed, btcUsdPriceFeed, weth, wbtc, deployerKey) = config.activeNetworkConfig();
+        (cu, defiProtocol, config) = deployer.run();
+
+        (ethUsdPriceFeed, btcUsdPriceFeed, weth, wbtc, deployerKey) = config
+            .activeNetworkConfig();
 
         address deployerAddress = vm.addr(deployerKey);
-        assertEq(deployerAddress, cu.owner(), "Deployer is not the owner of CuStableCoin");
 
         console.log("Expected Owner Address:", vm.addr(deployerKey));
         console.log("Actual Owner Address:", cu.owner());
 
-        // Set the caller to the deployer for subsequent actions
-        vm.prank(deployerAddress);
+        assertEq(
+            deployerAddress,
+            cu.owner(),
+            "Deployer is not the owner of CuStableCoin"
+        );
 
-        
+        // Set the caller to the deployer for subsequent actions
+        // vm.prank(deployerAddress);
     }
 
+    function test_testGetUsdValue() public {
+        uint256 ethAmount = 15 ether; // 15e18;
 
+        uint256 expectedUsd = (ethAmount * config.ETH_USD_PRICE()) /
+            (10 ** config.DECIMALS());
 
-    function test_testGetUsdValue() public  {
-        uint256 ethAmount = 15e18;
-        uint256 expectedUsd = 300000e18;
         vm.prank(vm.addr(deployerKey));
+
         uint256 actualUsd = defiProtocol._getUsdValue(weth, ethAmount);
+
         assertEq(expectedUsd, actualUsd);
     }
 }
