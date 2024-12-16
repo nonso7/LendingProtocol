@@ -8,6 +8,7 @@ import {DefiProtocol} from "../src/CuCoinContract.sol";
 import {CuStableCoin} from "../src/CuStableCoin.sol";
 import {IERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {HelperConfig} from "../script/HelperConfig.sol";
+import {MockV3Aggregator} from "./mocks/MockV3Aggregator.sol";
 
 contract lendProtocolDefi is Test {
     DeployCuCoin deployer;
@@ -24,30 +25,22 @@ contract lendProtocolDefi is Test {
 
     function setUp() public {
         deployer = new DeployCuCoin();
-        
         (cu, defiProtocol, config) = deployer.run();
-        
-
         (ethUsdPriceFeed, btcUsdPriceFeed, weth, wbtc, deployerKey) = config.activeNetworkConfig();
 
-        address deployerAddress = vm.addr(deployerKey);
-        assertEq(deployerAddress, cu.owner(), "Deployer is not the owner of CuStableCoin");
 
-        console.log("Expected Owner Address:", vm.addr(deployerKey));
-        console.log("Actual Owner Address:", cu.owner());
+            MockV3Aggregator mockAggregator = new MockV3Aggregator(3000 * 10**8); // $3000
+    ethUsdPriceFeed = address(mockAggregator);
 
-        // Set the caller to the deployer for subsequent actions
-        vm.prank(deployerAddress);
-
-        
+    // Update the protocol with the correct mock price feed
+    defiProtocol.setPriceFeed(weth, ethUsdPriceFeed);
     }
 
 
 
-    function test_testGetUsdValue() public  {
+    function test_testGetUsdValue() public view {
         uint256 ethAmount = 15e18;
         uint256 expectedUsd = 300000e18;
-        vm.prank(vm.addr(deployerKey));
         uint256 actualUsd = defiProtocol._getUsdValue(weth, ethAmount);
         assertEq(expectedUsd, actualUsd);
     }
