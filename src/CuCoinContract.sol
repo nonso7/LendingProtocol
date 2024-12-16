@@ -38,7 +38,7 @@ contract DefiProtocol {
         private _collateralDeposited;
     mapping(address user => mapping(address token => uint256 amount))
         private _tokenBorrowed;
-    mapping(address => bool) private whitelistedTokens;
+    mapping(address => bool) public whitelistedTokens;
     mapping(address user => uint256 amount) private _CuCoinMinted;
     mapping(address user => Borrow) private loanAccumulation;
     mapping(address users => Auction) public userAuctions;
@@ -114,6 +114,10 @@ contract DefiProtocol {
         }
         i_dsCu = CuStableCoin(CuCoinAddress);
         auctionContract = _auctionContract;
+    }
+
+    function isTokenWhitelisted(address tokenAddress) external  returns (bool) {
+    return whitelistedTokens[tokenAddress] = true;
     }
 
     function depositCollateral(
@@ -419,5 +423,9 @@ contract DefiProtocol {
             "Flash loan hasn't been paid with interest"
         );
         return true;
+    }
+
+    function getAccountDetails(address user) public view returns(uint256 totalCuCoinMinted, uint256 collateralValeInUsd) {
+        (totalCuCoinMinted, collateralValeInUsd) = _getAccounDetails(user);
     }
 }

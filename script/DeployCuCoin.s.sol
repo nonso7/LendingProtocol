@@ -25,11 +25,11 @@ contract DeployCuCoin is Script {
             uint256 deployerKey
         ) = config.activeNetworkConfig();
 
-        console.log("weth", weth);
-        console.log("wbtc", wbtc);
+        // console.log("weth", weth);
+        // console.log("wbtc", wbtc);
 
-        console.log("wethUsdPriceFeed", wethUsdPriceFeed);
-        console.log("wbtcUsdPriceFeed", wbtcUsdPriceFeed);
+        // console.log("wethUsdPriceFeed", wethUsdPriceFeed);
+        // console.log("wbtcUsdPriceFeed", wbtcUsdPriceFeed);
 
         tokenAddresses = [weth, wbtc];
         priceFeedAddresses = [wethUsdPriceFeed, wbtcUsdPriceFeed];
