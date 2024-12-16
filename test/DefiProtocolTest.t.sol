@@ -16,7 +16,6 @@ contract lendProtocolDefi is Test {
     CuStableCoin cu;
     HelperConfig config;
 
-
     address public ethUsdPriceFeed;
     address public btcUsdPriceFeed;
     address public weth;
@@ -36,12 +35,17 @@ contract lendProtocolDefi is Test {
     defiProtocol.setPriceFeed(weth, ethUsdPriceFeed);
     }
 
+    function test_testGetUsdValue() public {
+        uint256 ethAmount = 15 ether; // 15e18;
 
+        uint256 expectedUsd = (ethAmount * config.ETH_USD_PRICE()) /
+            (10 ** config.DECIMALS());
 
     function test_testGetUsdValue() public view {
         uint256 ethAmount = 15e18;
         uint256 expectedUsd = 300000e18;
         uint256 actualUsd = defiProtocol._getUsdValue(weth, ethAmount);
+
         assertEq(expectedUsd, actualUsd);
     }
 }
