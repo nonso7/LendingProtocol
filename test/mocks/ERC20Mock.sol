@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract ERC20Mock is ERC20 {
-    constructor(
-        string memory name,
-        string memory symbol,
-        address initialAccount,
-        uint256 initialBalance
-    )
+
+    mapping(address account => uint256) private _balances;
+
+    constructor(string memory name, string memory symbol, address initialAccount, uint256 initialBalance)
         payable
         ERC20(name, symbol)
     {
@@ -30,5 +28,9 @@ contract ERC20Mock is ERC20 {
 
     function approveInternal(address owner, address spender, uint256 value) public {
         _approve(owner, spender, value);
+    }
+
+        function balanceOf(address account) public view override returns (uint256) {
+        return _balances[account];
     }
 }

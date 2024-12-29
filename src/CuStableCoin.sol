@@ -18,9 +18,7 @@ contract CuStableCoin is ERC20Burnable, Ownable {
     event TokensBurned(address indexed from, uint256 amount);
 
     // Constructor to initialize the token and set the owner
-    constructor(address initialOwner) ERC20("CuCoin", "Cu") Ownable(initialOwner) {
-        
-    }
+    constructor(address initialOwner) ERC20("CuCoin", "Cu") Ownable(initialOwner) {}
 
     // Mint function restricted to the owner
     function mint(address _to, uint256 _amount) external onlyOwner {

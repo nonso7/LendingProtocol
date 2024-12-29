@@ -3,7 +3,7 @@ pragma solidity 0.8.24;
 
 import {IERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {CuStableCoin} from "./CuStableCoin.sol";
-import { OracleLib} from "./Libraries/OracleLib.sol";
+import {OracleLib} from "./Libraries/OracleLib.sol";
 import {AggregatorV3Interface} from "../test/mocks/AggregatorV3Interface.sol";
 
 contract DefiProtocol {
@@ -32,12 +32,12 @@ contract DefiProtocol {
     error Protocol_HealthFactorOk();
     error Protocol_TranferFailed();
     error Protocol_FlashLoanHasntBeenPaidBack();
+    error Protocol__BreaksHealthFactor(uint256);
+    error CuCoin__MintFailed();
 
     mapping(address token => address priceFeeds) _priceFeeds;
-    mapping(address user => mapping(address token => uint256 amount))
-        private _collateralDeposited;
-    mapping(address user => mapping(address token => uint256 amount))
-        private _tokenBorrowed;
+    mapping(address user => mapping(address token => uint256 amount)) private _collateralDeposited;
+    mapping(address user => mapping(address token => uint256 amount)) private _tokenBorrowed;
     mapping(address => bool) public whitelistedTokens;
     mapping(address user => uint256 amount) private _CuCoinMinted;
     mapping(address user => Borrow) private loanAccumulation;
@@ -46,9 +46,10 @@ contract DefiProtocol {
 
     address public auctionContract; // Auction contract address
     uint256 public constant TRANSFER_FEE_PERCENTAGE = 8; // 8% fee
-    uint256 private constant PRECISION = 1e18;
+    uint256 public constant PRECISION = 1e18;
     uint256 private constant ADDITIONAL_FEED_PRECISION = 1e10;
     uint256 private constant FEED_PRECISION = 1e8;
+    uint256 private constant MIN_HEALTH_FACTOR = 1e18;
 
     CuStableCoin private immutable i_dsCu;
     uint256 public constant COLLATERALIZATION_RATIO = 150;
@@ -58,30 +59,13 @@ contract DefiProtocol {
     uint256 public constant REWARD_POOL_PERCENTAGE = 20;
     uint256 public constant FLASH_LOAN_INTEREST = 9;
 
-    event CollateralDeposited(
-        address indexed user,
-        address indexed token,
-        uint256 indexed amount
-    );
+    event CollateralDeposited(address indexed user, address indexed token, uint256 indexed amount);
     event LoanRepaid(address indexed user, uint256 indexed amount);
-    event CollateralRedeemed(
-        address indexed redeemFrom,
-        address indexed redeemTo,
-        address token,
-        uint256 amount
-    );
+    event CollateralRedeemed(address indexed redeemFrom, address indexed redeemTo, address token, uint256 amount);
     event AuctionEntered(
-        address indexed user,
-        address indexed liquidator,
-        address collateral,
-        uint256 collateralAmount,
-        uint256 bonus
+        address indexed user, address indexed liquidator, address collateral, uint256 collateralAmount, uint256 bonus
     );
-    event LoanTaken(
-        address indexed borrower,
-        uint256 amount,
-        uint256 interestRate
-    );
+    event LoanTaken(address indexed borrower, uint256 amount, uint256 interestRate);
     event RewardPoolFunded(uint256 amount);
 
     modifier moreThanZero(uint256 amount) {
@@ -116,33 +100,20 @@ contract DefiProtocol {
         auctionContract = _auctionContract;
     }
 
-    function isTokenWhitelisted(address tokenAddress) external  returns (bool) {
-    return whitelistedTokens[tokenAddress] = true;
-    }
-
-    function depositCollateral(
-        address tokenCollateralAddress,
-        uint256 amount
-    )
+    function depositCollateral(address tokenCollateralAddress, uint256 amount)
         external
         moreThanZero(amount)
         onlyWishListedToken(tokenCollateralAddress)
     {
-        _collateralDeposited[msg.sender][tokenCollateralAddress] -= amount;
+        _collateralDeposited[msg.sender][tokenCollateralAddress] += amount;
         emit CollateralDeposited(msg.sender, tokenCollateralAddress, amount);
-        bool success = IERC20(tokenCollateralAddress).transferFrom(
-            msg.sender,
-            address(this),
-            amount
-        );
+        bool success = IERC20(tokenCollateralAddress).transferFrom(msg.sender, address(this), amount);
         if (!success) {
             revert Protocol_CollateralDepositeFailed();
         }
     }
 
-    function _getAccounDetails(
-        address user
-    )
+    function _getAccountDetails(address user)
         private
         view
         returns (uint256 totalCuCoinMinted, uint256 collateralValeInUsd)
@@ -152,25 +123,27 @@ contract DefiProtocol {
     }
 
     function healthFactorDetails(address user) private view returns (uint256) {
-        (
-            uint256 totalCuCoinMinted,
-            uint256 collateralValeInUsd
-        ) = _getAccounDetails(user);
+        (uint256 totalCuCoinMinted, uint256 collateralValeInUsd) = _getAccountDetails(user);
         return calculateHealthFactor(totalCuCoinMinted, collateralValeInUsd);
     }
 
-    function calculateHealthFactor(
-        uint256 totalCuCoinMinted,
-        uint256 collateralValeInUsd
-    ) internal pure returns (uint256) {
-        uint256 collateralThreashold = (collateralValeInUsd *
-            COLLATERALIZATION_RATIO) / LIQUIDATION_PRECISION;
+    function calculateHealthFactor(uint256 totalCuCoinMinted, uint256 collateralValeInUsd)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 collateralThreashold = (collateralValeInUsd * COLLATERALIZATION_RATIO) / LIQUIDATION_PRECISION;
         return (collateralThreashold * PRECISION) / totalCuCoinMinted;
     }
 
-    function getTotalCollateralValue(
-        address user
-    ) public view returns (uint256 totalCollateralValueInUsd) {
+        function revertIfHealthFactorIsBroken(address user) internal view {
+        uint256 userHealthFactor = healthFactorDetails(user);
+        if (userHealthFactor < MIN_HEALTH_FACTOR) {
+            revert Protocol__BreaksHealthFactor(userHealthFactor);
+        }
+    }
+
+    function getTotalCollateralValue(address user) public view returns (uint256 totalCollateralValueInUsd) {
         for (uint256 i = 0; i < collateralTokenAddress.length; i++) {
             address token = collateralTokenAddress[i];
             uint256 amount = _collateralDeposited[user][token];
@@ -179,27 +152,17 @@ contract DefiProtocol {
         return totalCollateralValueInUsd;
     }
 
-    function _getUsdValue(
-        address token,
-        uint256 amount
-    ) public view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(
-            _priceFeeds[token]
-        );
-        (, int256 price, , , ) = priceFeed.latestRoundData();
+    function _getUsdValue(address token, uint256 amount) public view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(_priceFeeds[token]);
+        (, int256 price,,,) = priceFeed.latestRoundData();
         // 1 ETH = 1000 USD
         // The returned value from Chainlink will be 1000 * 1e8
         // Most USD pairs have 8 decimals, so we will just pretend they all do
         // We want to have everything in terms of WEI, so we add 10 zeros at the end
-        return
-            ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount) / PRECISION;
+        return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount) / PRECISION;
     }
 
-    function borrow(
-        uint256 amount,
-        address tokenCollateralAddress,
-        uint256 interestRate
-    )
+    function borrow(uint256 amount, address tokenCollateralAddress, uint256 interestRate)
         external
         moreThanZero(amount)
         onlyWishListedToken(tokenCollateralAddress)
@@ -212,21 +175,15 @@ contract DefiProtocol {
 
         Borrow storage existingLoan = loanAccumulation[msg.sender];
         if (existingLoan.amountBorrowed > 0) {
-            uint256 accruedInterest = calculateInterest(
-                existingLoan.amountBorrowed,
-                existingLoan.interestRate,
-                existingLoan.borrowTimestamp
-            );
+            uint256 accruedInterest =
+                calculateInterest(existingLoan.amountBorrowed, existingLoan.interestRate, existingLoan.borrowTimestamp);
 
             // Update loan balance and reset timestamp
             existingLoan.amountBorrowed += accruedInterest;
             existingLoan.borrowTimestamp = block.timestamp;
         }
 
-        bool success = IERC20(tokenCollateralAddress).transfer(
-            msg.sender,
-            amount
-        );
+        bool success = IERC20(tokenCollateralAddress).transfer(msg.sender, amount);
         if (!success) {
             revert Protocol_BorrowFailedTxn();
         }
@@ -244,19 +201,13 @@ contract DefiProtocol {
 
         // Calculate accrued interest
         uint256 elapsedTime = block.timestamp - loan.borrowTimestamp;
-        uint256 interest = (loan.amountBorrowed *
-            loan.interestRate *
-            elapsedTime) / SECONDS_IN_A_YEAR;
+        uint256 interest = (loan.amountBorrowed * loan.interestRate * elapsedTime) / SECONDS_IN_A_YEAR;
 
         // Calculate total repayment (principal + interest)
         uint256 totalRepayment = loan.amountBorrowed + interest;
 
         // Transfer repayment from the borrower to the protocol
-        bool success = IERC20(tokenCollateralAddress).transferFrom(
-            msg.sender,
-            address(this),
-            totalRepayment
-        );
+        bool success = IERC20(tokenCollateralAddress).transferFrom(msg.sender, address(this), totalRepayment);
         if (!success) {
             revert Protocol_LoanRepaymentFailed();
         }
@@ -275,23 +226,20 @@ contract DefiProtocol {
         uint256 borrowTimestamp
     ) public view returns (uint256) {
         uint256 elapsedTime = block.timestamp - borrowTimestamp; // Elapsed time in seconds
-        return
-            (principal * annualRate * elapsedTime) /
-            (10000 * SECONDS_IN_A_YEAR);
+        return (principal * annualRate * elapsedTime) / (10000 * SECONDS_IN_A_YEAR);
     }
 
-    function lendingWithFee(
-        address token,
-        uint256 lendingAmount
-    ) public onlyWishListedToken(token) {
+    function setAuctionContract(address _auctionContract) external {
+        require(_auctionContract != address(0), "zero address detected");
+        auctionContract = _auctionContract;
+    }
+
+    function lendingWithFee(address token, uint256 lendingAmount) public onlyWishListedToken(token) {
         uint256 fee = (lendingAmount * 8) / 100;
         uint256 amountAfterFee = lendingAmount - fee;
 
         // Transfer net amount to borrower
-        bool transferToBorrower = IERC20(token).transfer(
-            msg.sender,
-            amountAfterFee
-        );
+        bool transferToBorrower = IERC20(token).transfer(msg.sender, amountAfterFee);
         if (!transferToBorrower) {
             revert Protocol_LendTransferFailed();
         }
@@ -303,51 +251,26 @@ contract DefiProtocol {
         }
     }
 
-    function getTokenAmountFromUsd(
-        address token,
-        uint256 usdAmountInWei
-    ) public view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(
-            _priceFeeds[token]
-        );
-        (, int256 price, , , ) = priceFeed.latestRoundData();
+    function getTokenAmountFromUsd(address token, uint256 usdAmountInWei) public view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(_priceFeeds[token]);
+        (, int256 price,,,) = priceFeed.latestRoundData();
         // $100e18 USD Debt
         // 1 ETH = 2000 USD
         // The returned value from Chainlink will be 2000 * 1e8
         // Most USD pairs have 8 decimals, so we will just pretend they all do
-        return ((usdAmountInWei * PRECISION) /
-            (uint256(price) * ADDITIONAL_FEED_PRECISION));
+        return ((usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_FEED_PRECISION));
     }
 
-    function liquidate(
-        address tokenCollateral,
-        address user,
-        uint256 debtToCover
-    ) external moreThanZero(debtToCover) {
+    function liquidate(address tokenCollateral, address user, uint256 debtToCover) external moreThanZero(debtToCover) {
         uint256 startingUserHealthFactor = healthFactorDetails(user);
         if (startingUserHealthFactor >= 1) {
             revert Protocol_HealthFactorOk();
         }
 
-        uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(
-            tokenCollateral,
-            debtToCover
-        );
-        uint256 bonusCollateral = (tokenAmountFromDebtCovered *
-            LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
-        reedemCollateral(
-            tokenCollateral,
-            tokenAmountFromDebtCovered + bonusCollateral,
-            user,
-            msg.sender
-        );
-        _enterAuction(
-            user,
-            msg.sender,
-            tokenCollateral,
-            tokenAmountFromDebtCovered,
-            bonusCollateral
-        );
+        uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(tokenCollateral, debtToCover);
+        uint256 bonusCollateral = (tokenAmountFromDebtCovered * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
+        reedemCollateral(tokenCollateral, tokenAmountFromDebtCovered + bonusCollateral, user, msg.sender);
+        _enterAuction(user, msg.sender, tokenCollateral, tokenAmountFromDebtCovered, bonusCollateral);
         _fundRewardPool(tokenAmountFromDebtCovered + bonusCollateral);
         uint256 endingUserHealthFactor = healthFactorDetails(user);
         if (endingUserHealthFactor <= startingUserHealthFactor) {
@@ -362,16 +285,8 @@ contract DefiProtocol {
         address liquidator
     ) private {
         _collateralDeposited[from][tokenCollateralAddress] -= amountCollateral;
-        emit CollateralRedeemed(
-            from,
-            liquidator,
-            tokenCollateralAddress,
-            amountCollateral
-        );
-        bool success = IERC20(tokenCollateralAddress).transfer(
-            liquidator,
-            amountCollateral
-        );
+        emit CollateralRedeemed(from, liquidator, tokenCollateralAddress, amountCollateral);
+        bool success = IERC20(tokenCollateralAddress).transfer(liquidator, amountCollateral);
         if (!success) {
             revert Protocol_TranferFailed();
         }
@@ -389,13 +304,7 @@ contract DefiProtocol {
         auction.collateralAmount = collateralAmount + bonus;
         auction.startTime = block.timestamp;
 
-        emit AuctionEntered(
-            user,
-            liquidator,
-            collateral,
-            collateralAmount,
-            bonus
-        );
+        emit AuctionEntered(user, liquidator, collateral, collateralAmount, bonus);
     }
 
     function _fundRewardPool(uint256 amount) internal {
@@ -404,28 +313,78 @@ contract DefiProtocol {
         emit RewardPoolFunded(amount);
     }
 
-    function flashLoans(
-        address tokenAddress,
-        uint256 amount
-    ) external returns (bool) {
+    function flashLoans(address tokenAddress, uint256 amount) external returns (bool) {
         require(amount > 0, "You should borrow a specific amount");
         uint256 balanceBefore = IERC20(tokenAddress).balanceOf(address(this));
         require(balanceBefore >= amount, "Not enough token in balance");
         uint256 flashLoanFee = (amount * FLASH_LOAN_INTEREST) / 1000;
-        require(
-            IERC20(tokenAddress).transfer(msg.sender, amount),
-            "Flash loan transfer failed"
-        );
+        require(IERC20(tokenAddress).transfer(msg.sender, amount), "Flash loan transfer failed");
 
         uint256 balanceAfter = IERC20(tokenAddress).balanceOf(address(this));
-        require(
-            balanceAfter >= balanceBefore + flashLoanFee,
-            "Flash loan hasn't been paid with interest"
-        );
+        require(balanceAfter >= balanceBefore + flashLoanFee, "Flash loan hasn't been paid with interest");
         return true;
     }
 
-    function getAccountDetails(address user) public view returns(uint256 totalCuCoinMinted, uint256 collateralValeInUsd) {
-        (totalCuCoinMinted, collateralValeInUsd) = _getAccounDetails(user);
+        function mintCu(uint256 amountCuToMint) public moreThanZero(amountCuToMint) {
+        _CuCoinMinted[msg.sender] += amountCuToMint;
+        revertIfHealthFactorIsBroken(msg.sender);
+        i_dsCu.mint(msg.sender, amountCuToMint);
+    }
+
+    function getAccountDetails(address user)
+        public
+        view
+        returns (uint256 totalCuCoinMinted, uint256 collateralValeInUsd)
+    {
+        (totalCuCoinMinted, collateralValeInUsd) = _getAccountDetails(user);
+    }
+
+    function getCollateralDeposited(address user, address token) external view returns (uint256) {
+        return _collateralDeposited[user][token];
+    }
+
+    function getcalculateHealthFactor(uint256 totalCuCoinMinted, uint256 collateralValueInUsd)
+        public
+        pure
+        returns (uint256)
+    {
+        return calculateHealthFactor(totalCuCoinMinted, collateralValueInUsd);
+    }
+
+    function setCollateralDeposited(address user, address token, uint256 amount) public {
+        _collateralDeposited[user][token] = amount;
+    }
+
+    function enterAuctionForTesting(
+        address user,
+        address liquidator,
+        address collateral,
+        uint256 collateralAmount,
+        uint256 bonus
+    ) external {
+        _enterAuction(user, liquidator, collateral, collateralAmount, bonus);
+    }
+
+    function getAuctionDetails(address user)
+        external
+        view
+        returns (address liquidator, uint256 collateralAmount, uint256 startTime)
+    {
+        Auction storage auction = userAuctions[user];
+        return (auction.liquidator, auction.collateralAmount, auction.startTime);
+    }
+
+    function fundRewardPoolForTesting(uint256 amount) external {
+        _fundRewardPool(amount);
+    }
+
+        function testReedemCollateral(
+        address tokenCollateralAddress,
+        uint256 amountCollateral,
+        address from,
+        address liquidator
+    ) external 
+        onlyWishListedToken(tokenCollateralAddress){
+        reedemCollateral(tokenCollateralAddress, amountCollateral, from, liquidator);
     }
 }

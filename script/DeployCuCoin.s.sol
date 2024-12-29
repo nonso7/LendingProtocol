@@ -17,13 +17,8 @@ contract DeployCuCoin is Script {
     function run() external returns (CuStableCoin, DefiProtocol, HelperConfig) {
         HelperConfig config = new HelperConfig(); // This comes with our mocks!
 
-        (
-            address wethUsdPriceFeed,
-            address wbtcUsdPriceFeed,
-            address weth,
-            address wbtc,
-            uint256 deployerKey
-        ) = config.activeNetworkConfig();
+        (address wethUsdPriceFeed, address wbtcUsdPriceFeed, address weth, address wbtc, uint256 deployerKey) =
+            config.activeNetworkConfig();
 
         // console.log("weth", weth);
         // console.log("wbtc", wbtc);
@@ -37,12 +32,7 @@ contract DeployCuCoin is Script {
         address deployer = vm.addr(deployerKey);
         vm.startBroadcast(deployer);
         CuStableCoin cu = new CuStableCoin(deployer);
-        DefiProtocol cud = new DefiProtocol(
-            tokenAddresses,
-            priceFeedAddresses,
-            address(cu),
-            auctionContract
-        );
+        DefiProtocol cud = new DefiProtocol(tokenAddresses, priceFeedAddresses, address(cu), auctionContract);
 
         // cu.transferOwnership(initialOwner);
         // initialOwner = msg.sender; // address(this)
