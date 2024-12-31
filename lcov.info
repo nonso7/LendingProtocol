@@ -143,7 +143,7 @@ LF:12
 LH:6
 BRF:0
 BRH:0
-end_of_record
+end_of_recordDecentralizedStableCoin
 TN:
 SF:test/mocks/MockV3Aggregator.sol
 DA:24,28
